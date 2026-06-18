@@ -1,0 +1,6 @@
+fastapi>=0.100.0
+uvicorn>=0.20.0
+yt-dlp>=2024.0.0
+Pillow>=10.0.0
+python-multipart>=0.0.20
+python-dotenv>=1.0.0

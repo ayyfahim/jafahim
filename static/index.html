@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YT Automator — YouTube Content Pipeline</title>
+  <meta name="description" content="Batch YouTube content pipeline: download audio & thumbnails, create videos, generate styled thumbnails">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app">
+
+    <!-- ─── Header ──────────────────────────────────────── -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">⚡</span>
+        <h1>YT Automator</h1>
+      </div>
+    </header>
+
+    <!-- ─── Tab Navigation ──────────────────────────────── -->
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="download" role="tab" id="tab-btn-download" aria-selected="true">
+        <span class="tab-icon">📥</span>
+        <span>Download</span>
+      </button>
+      <button class="tab" data-tab="studio" role="tab" id="tab-btn-studio" aria-selected="false">
+        <span class="tab-icon">🎬</span>
+        <span>Studio</span>
+      </button>
+      <button class="tab" data-tab="queue" role="tab" id="tab-btn-queue" aria-selected="false">
+        <span class="tab-icon">⚙️</span>
+        <span>Queue</span>
+        <span id="queue-tab-badge" class="tab-badge hidden">0</span>
+      </button>
+    </nav>
+
+    <!-- ─── Main Content ────────────────────────────────── -->
+    <main class="content">
+
+      <!-- ═══ TAB 1: Download ═══════════════════════════ -->
+      <section id="tab-download" class="tab-panel active" role="tabpanel">
+        <div class="panel-header">
+          <h2>Channel Downloads</h2>
+          <p>Fetch videos from a YouTube channel, then batch download audio &amp; thumbnails</p>
+        </div>
+
+        <div class="card">
+          <div class="form-group">
+            <label for="channel-url">Channel URL</label>
+            <div class="input-group">
+              <input type="text" id="channel-url" class="input"
+                     placeholder="https://www.youtube.com/@channelname">
+              <button id="fetch-btn" class="btn-primary">
+                <span class="btn-text">Fetch Videos</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Sort by</label>
+              <div class="toggle-group" id="sort-toggle">
+                <button class="toggle active" data-sort="latest">Latest</button>
+                <button class="toggle" data-sort="popular">Popular</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Videos: <span id="count-value">10</span></label>
+              <input type="range" id="video-count" class="slider" min="1" max="50" value="10">
+            </div>
+          </div>
+        </div>
+
+        <!-- Loading -->
+        <div id="fetch-loading" class="loading-state hidden">
+          <div class="spinner spinner-large"></div>
+          <p>Fetching channel videos…</p>
+        </div>
+
+        <!-- Video List -->
+        <div id="video-list-container" class="hidden">
+          <div class="list-header">
+            <span id="channel-name-display" class="channel-badge"></span>
+            <div class="list-actions">
+              <button id="select-all-btn" class="btn-ghost">Deselect All</button>
+              <button id="download-btn" class="btn-primary" disabled>
+                <span class="btn-text">Download Selected</span>
+              </button>
+            </div>
+          </div>
+          <div id="video-list" class="video-list"></div>
+        </div>
+      </section>
+
+      <!-- ═══ TAB 2: Studio ═════════════════════════════ -->
+      <section id="tab-studio" class="tab-panel" role="tabpanel">
+        <div class="panel-header">
+          <h2>Studio</h2>
+          <p>Browse downloads, create videos &amp; custom thumbnails per item</p>
+        </div>
+
+        <div class="studio-controls">
+          <select id="channel-select" class="input">
+            <option value="">Select a channel…</option>
+          </select>
+          <button id="refresh-studio-btn" class="btn-ghost">↻ Refresh</button>
+        </div>
+
+        <div id="studio-items" class="studio-grid"></div>
+        <div id="studio-empty" class="empty-state">
+          <div class="empty-icon">📁</div>
+          <p>Select a channel to browse downloaded content</p>
+        </div>
+      </section>
+
+      <!-- ═══ TAB 3: Queue ══════════════════════════════ -->
+      <section id="tab-queue" class="tab-panel" role="tabpanel">
+        <div class="panel-header">
+          <h2>Render Queue</h2>
+          <p>Video render jobs — processed one at a time to avoid GPU contention</p>
+        </div>
+
+        <div class="queue-controls">
+          <button id="clear-queue-btn" class="btn-ghost">Clear Completed</button>
+        </div>
+
+        <div id="queue-list" class="queue-list"></div>
+        <div id="queue-empty" class="empty-state">
+          <div class="empty-icon">🎬</div>
+          <p>No render jobs yet. Create videos from the Studio tab.</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ═══ Modal: Video Creation ═══════════════════════════ -->
+  <div id="video-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>🎬 Create Video</h3>
+        <button class="modal-close" data-modal="video-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-info">
+          <p class="modal-item-title" id="vm-title"></p>
+          <p class="modal-item-channel" id="vm-channel"></p>
+        </div>
+
+        <h4>Choose Background Images</h4>
+        <div class="library-section">
+          <div id="vm-library" class="library-grid"></div>
+          <div class="library-upload">
+            <button id="vm-upload-btn" class="btn-ghost btn-sm">+ Upload Images</button>
+            <input type="file" id="vm-upload-input" accept="image/*" multiple hidden>
+          </div>
+        </div>
+        <p class="selected-image-label">Selected: <span id="vm-selected-name">None</span></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" data-modal="video-modal">Cancel</button>
+        <button id="vm-submit" class="btn-primary" disabled>
+          <span class="btn-text">Add to Queue</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Modal: Thumbnail Creation ═══════════════════════ -->
+  <!-- Prepare Download Automation -->
+  <div id="prepare-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Prepare Video Render</h3>
+        <button class="modal-close" data-modal="prepare-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-info">
+          <p class="modal-item-title" id="pm-title"></p>
+          <p class="modal-item-channel" id="pm-channel"></p>
+        </div>
+
+        <h4>Render Images</h4>
+        <div id="pm-render-library" class="library-grid"></div>
+        <p class="selected-image-label">Selected: <span id="pm-render-count">None</span></p>
+
+        <div class="library-upload">
+          <button id="pm-upload-btn" class="btn-ghost btn-sm">+ Upload Images</button>
+          <input type="file" id="pm-upload-input" accept="image/*" multiple hidden>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" data-modal="prepare-modal">Cancel</button>
+        <button id="pm-submit" class="btn-primary">
+          <span class="btn-text">Save Preparation</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="thumbnail-modal" class="modal-overlay hidden">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3>🖼️ Create Thumbnail</h3>
+        <button class="modal-close" data-modal="thumbnail-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-info">
+          <p class="modal-item-title" id="tm-title"></p>
+          <p class="modal-item-channel" id="tm-channel"></p>
+        </div>
+
+        <div class="thumb-editor-grid">
+          <!-- Left: Controls -->
+          <div class="thumb-controls">
+            <h4>Background Image</h4>
+            <div class="library-section library-section-sm">
+              <div id="tm-library" class="library-grid library-grid-sm"></div>
+              <div class="library-upload" style="display:flex;gap:6px;flex-wrap:wrap">
+                <button id="tm-upload-btn" class="btn-ghost btn-sm">+ Upload</button>
+                <button id="tm-gallery-btn" class="btn-ghost btn-sm" onclick="openTmGallery()">🖼️ Browse Gallery</button>
+                <input type="file" id="tm-upload-input" accept="image/*" hidden>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="tm-text">Title Text</label>
+              <textarea id="tm-text" class="input textarea"
+                        placeholder="One headline row per line"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Click words to highlight</label>
+              <div id="tm-word-chips" class="word-chips">
+                <span class="text-muted text-sm">Type text above</span>
+              </div>
+            </div>
+
+            <!-- Font picker -->
+            <div class="form-group">
+              <label for="tm-font-name">Font</label>
+              <select id="tm-font-name" class="input">
+                <option value="Impact">Impact (default)</option>
+              </select>
+            </div>
+
+            <!-- Font size -->
+            <div class="form-group">
+              <label>Font Size: <span id="tm-font-size-val">72</span>px</label>
+              <input type="range" id="tm-font-size" class="slider" min="36" max="120" value="72">
+            </div>
+
+            <div class="form-group">
+              <label>Line Sizes</label>
+              <div id="tm-line-controls" class="line-size-controls">
+                <span class="text-muted text-sm">Add text lines to tune each row</span>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="tm-text-color">Text Color</label>
+                <input type="color" id="tm-text-color" class="input input-color" value="#ffffff">
+              </div>
+              <div class="form-group">
+                <label for="tm-highlight-color">Highlight Color</label>
+                <input type="color" id="tm-highlight-color" class="input input-color" value="#ffd636">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Box Width: <span id="tm-box-width-val">52</span>%</label>
+              <input type="range" id="tm-box-width" class="slider" min="25" max="90" value="52">
+            </div>
+
+            <div class="form-group">
+              <label>Box Fit</label>
+              <div class="toggle-group" id="tm-fit-toggle">
+                <button class="toggle active" data-fit="on" title="Shrink oversized rows so they stay inside the box">Fit</button>
+                <button class="toggle" data-fit="off" title="Use exact sizes and allow wider rows">Free</button>
+              </div>
+            </div>
+
+            <!-- Text alignment -->
+            <div class="form-group">
+              <label>Text Alignment</label>
+              <div class="toggle-group" id="tm-align-toggle">
+                <button class="toggle" data-align="left" title="Left">⬅ Left</button>
+                <button class="toggle active" data-align="center" title="Center">⬌ Center</button>
+                <button class="toggle" data-align="right" title="Right">Right ➡</button>
+              </div>
+            </div>
+
+            <!-- Text effect -->
+            <div class="form-group">
+              <label>Text Effect</label>
+              <div class="toggle-group" id="tm-shadow-toggle">
+                <button class="toggle active" data-shadow="both" title="Shadow + Stroke">Both</button>
+                <button class="toggle" data-shadow="shadow" title="Drop Shadow only">Shadow</button>
+                <button class="toggle" data-shadow="stroke" title="Stroke/Outline only">Stroke</button>
+                <button class="toggle" data-shadow="none" title="No effect">None</button>
+              </div>
+            </div>
+
+            <!-- Box color + opacity -->
+            <div class="form-row">
+              <div class="form-group">
+                <label for="tm-box-color">Box Color</label>
+                <input type="color" id="tm-box-color" class="input input-color" value="#000000">
+              </div>
+              <div class="form-group">
+                <label>Opacity: <span id="tm-box-opacity-val">70</span>%</label>
+                <input type="range" id="tm-box-opacity" class="slider" min="0" max="100" value="70">
+              </div>
+            </div>
+
+            <!-- Position -->
+            <div class="form-row">
+              <div class="form-group">
+                <label>X: <span id="tm-pos-x-val">50</span>%</label>
+                <input type="range" id="tm-pos-x" class="slider" min="0" max="100" value="50">
+              </div>
+              <div class="form-group">
+                <label>Y: <span id="tm-pos-y-val">72</span>%</label>
+                <input type="range" id="tm-pos-y" class="slider" min="0" max="100" value="72">
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Preview -->
+          <div class="thumb-preview-section">
+            <h4>Live Preview</h4>
+            <div class="canvas-wrap">
+              <canvas id="tm-preview" width="1280" height="720"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" data-modal="thumbnail-modal">Cancel</button>
+        <button id="tm-submit" class="btn-primary">
+          <span class="btn-text">Generate Thumbnail</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══ Modal: Image Gallery ═══════════════════════════════ -->
+  <div id="gallery-modal" class="modal-overlay hidden">
+    <div class="modal modal-gallery">
+      <div class="modal-header">
+        <h3>🖼️ Image Gallery</h3>
+        <button class="modal-close" data-modal="gallery-modal">✕</button>
+      </div>
+      <div class="gallery-body">
+        <!-- Sidebar -->
+        <aside class="gallery-sidebar" id="gallery-sidebar">
+          <div class="gallery-sidebar-section">
+            <div class="gallery-sidebar-title">Categories</div>
+            <button class="gallery-nav-btn active" data-gallery-view="all" id="gnav-all">
+              <span class="gallery-nav-icon">📁</span> All Library
+            </button>
+            <button class="gallery-nav-btn" data-gallery-view="render" id="gnav-render">
+              <span class="gallery-nav-icon">🎬</span> Video Render
+              <span class="gallery-nav-count" id="gnav-render-count">0</span>
+            </button>
+            <button class="gallery-nav-btn" data-gallery-view="thumbnail" id="gnav-thumbnail">
+              <span class="gallery-nav-icon">🖼️</span> Thumbnail
+              <span class="gallery-nav-count" id="gnav-thumbnail-count">0</span>
+            </button>
+            <button class="gallery-nav-btn" data-gallery-view="uncategorized" id="gnav-uncat">
+              <span class="gallery-nav-icon">📦</span> Uncategorized
+              <span class="gallery-nav-count" id="gnav-uncat-count">0</span>
+            </button>
+          </div>
+          <div class="gallery-sidebar-section">
+            <div class="gallery-sidebar-title">Channel Folders</div>
+            <div id="gallery-channel-folders"></div>
+          </div>
+          <div class="gallery-sidebar-section">
+            <div class="gallery-sidebar-title">Browse Folder</div>
+            <div class="gallery-browse-input-wrap">
+              <input type="text" id="gallery-browse-path" class="input gallery-browse-input"
+                     placeholder="D:\path\to\folder">
+              <button id="gallery-browse-go" class="btn-primary btn-sm">Go</button>
+            </div>
+            <div id="gallery-browse-roots"></div>
+          </div>
+        </aside>
+        <!-- Main grid -->
+        <div class="gallery-main">
+          <div class="gallery-toolbar">
+            <span class="gallery-view-label" id="gallery-view-label">All Library</span>
+            <span class="gallery-selected-label" id="gallery-selected-label">0 selected</span>
+          </div>
+          <div class="gallery-breadcrumb hidden" id="gallery-breadcrumb"></div>
+          <div class="gallery-grid" id="gallery-grid"></div>
+          <div class="gallery-empty hidden" id="gallery-empty">
+            <div class="empty-icon">🖼️</div>
+            <p>No images found</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="gallery-footer-left">
+          <button id="gallery-upload-btn" class="btn-ghost btn-sm">+ Upload to Library</button>
+          <input type="file" id="gallery-upload-input" accept="image/*" multiple hidden>
+        </div>
+        <div class="gallery-footer-right">
+          <button class="btn-ghost" data-modal="gallery-modal">Cancel</button>
+          <button id="gallery-confirm-btn" class="btn-primary" disabled>
+            <span class="btn-text">Select Images</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Modal: Edit Metadata ═══════════════════════════ -->
+  <div id="metadata-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>📝 Edit Video Metadata</h3>
+        <button class="modal-close" data-modal="metadata-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-info">
+          <p class="modal-item-title" id="mdm-title-display"></p>
+          <p class="modal-item-channel" id="mdm-channel-display"></p>
+        </div>
+
+        <div class="form-group">
+          <label for="mdm-title-input">Title</label>
+          <div class="input-with-actions">
+            <input type="text" id="mdm-title-input" class="input" placeholder="Video Title">
+            <button id="mdm-title-rewrite-btn" class="btn-ghost btn-sm" title="Rewrite Title with Gemini">✨ Rewrite</button>
+            <button id="mdm-title-copy-btn" class="btn-ghost btn-sm" title="Copy Title">📋 Copy</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="mdm-desc-input">Description</label>
+          <div class="input-with-actions align-start">
+            <textarea id="mdm-desc-input" class="input textarea" rows="6" placeholder="Video Description"></textarea>
+            <div class="textarea-actions">
+              <button id="mdm-desc-rewrite-btn" class="btn-ghost btn-sm" title="Rewrite Description with Gemini">✨ Rewrite</button>
+              <button id="mdm-desc-copy-btn" class="btn-ghost btn-sm" title="Copy Description">📋 Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" data-modal="metadata-modal">Cancel</button>
+        <button id="mdm-submit" class="btn-primary">
+          <span class="btn-text">Save Changes</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toasts" class="toasts"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
